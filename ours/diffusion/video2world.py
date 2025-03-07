@@ -14,11 +14,10 @@
 # limitations under the License.
 
 import os
-
 import nemo_run as run
 from huggingface_hub import snapshot_download
 from nemo.collections import llm
-from nemo.collections.diffusion.models.model import DiT7BVideo2WorldConfig, DiT14BVideo2WorldConfig
+from nemo.collections.diffusion.models.model import DiT7BVideo2WorldConfig, DiT14BVideo2WorldConfig, DiTXLConfig
 # from nemo.collections.diffusion.train import pretrain, videofolder_datamodule
 from ours.diffusion.train import pretrain, videofolder_datamodule
 from nemo.lightning.pytorch.strategies.utils import RestoreConfig
@@ -31,31 +30,30 @@ def cosmos_diffusion_7b_video2world_finetune() -> run.Partial:
     recipe.model.config = run.Config(DiT7BVideo2WorldConfig)
 
     # Trainer setup
-    recipe.trainer.max_steps = 1000
+    # recipe.trainer.max_steps = 1000
     recipe.optim.config.lr = 1e-6
-
     # Tensor / Sequence parallelism
+
+    print("SLURM_NNODES: ", os.environ.get('SLURM_NNODES', 1))
     recipe.trainer.strategy.tensor_model_parallel_size = 8
     recipe.trainer.strategy.sequence_parallel = True
     recipe.trainer.strategy.ckpt_async_save = False
-
     # FSDP
     recipe.trainer.strategy.ddp.with_megatron_fsdp_code_path = True
     recipe.trainer.strategy.ddp.data_parallel_sharding_strategy = "MODEL_AND_OPTIMIZER_STATES"
     recipe.trainer.strategy.ddp.overlap_param_gather = True
     recipe.trainer.strategy.ddp.overlap_grad_reduce = True
     recipe.model.config.use_cpu_initialization = True
-    recipe.data.global_batch_size = 2
 
     # Activation Checkpointing
     recipe.model.config.recompute_granularity = "full"
     recipe.model.config.recompute_method = "uniform"
     recipe.model.config.recompute_num_layers = 1
-
+    
     # Data setup
-    recipe.data = videofolder_datamodule()
+    recipe.data = videofolder_datamodule(global_batch=16)
     recipe.data.path = ""  # path to folder with processed dataset
-
+    
     # Checkpoint load
     recipe.resume.restore_config = run.Config(RestoreConfig, load_artifacts=False)
     recipe.resume.restore_config.path = os.path.join(
@@ -65,7 +63,7 @@ def cosmos_diffusion_7b_video2world_finetune() -> run.Partial:
 
     # Directory to save checkpoints / logs
     recipe.log.log_dir = "nemo_experiments/cosmos_diffusion_7b_video2world_finetune"
-
+    
     return recipe
 
 
@@ -73,15 +71,20 @@ def cosmos_diffusion_7b_video2world_finetune() -> run.Partial:
 def cosmos_diffusion_14b_video2world_finetune() -> run.Partial:
     # Model setup
     recipe = pretrain()
+
+    # cfg = run.Config(DiT14BVideo2WorldConfig)
+    # cfg.num_attention_heads = 64
+
     recipe.model.config = run.Config(DiT14BVideo2WorldConfig)
 
+
     # Trainer setup
-    recipe.trainer.max_steps = 1000
+    # recipe.trainer.max_steps = 1000
     recipe.optim.config.lr = 1e-6
 
     # Tensor / Sequence parallelism
     recipe.trainer.strategy.tensor_model_parallel_size = 8
-    recipe.trainer.strategy.sequence_parallel = True
+    recipe.trainer.strategy.sequence_parallel = True  
     recipe.trainer.strategy.ckpt_async_save = False
 
     # FSDP
@@ -95,11 +98,13 @@ def cosmos_diffusion_14b_video2world_finetune() -> run.Partial:
     recipe.model.config.recompute_granularity = "full"
     recipe.model.config.recompute_method = "uniform"
     recipe.model.config.recompute_num_layers = 1
+    
 
     # Data setup
+
     recipe.data = videofolder_datamodule(global_batch=2)
     recipe.data.path = ""  # path to folder with processed dataset
-
+    
     # Checkpoint load
     recipe.resume.restore_config = run.Config(RestoreConfig, load_artifacts=False)
     recipe.resume.restore_config.path = os.path.join(
@@ -115,3 +120,4 @@ def cosmos_diffusion_14b_video2world_finetune() -> run.Partial:
 
 if __name__ == "__main__":
     run.cli.main(llm.train, default_factory=cosmos_diffusion_7b_video2world_finetune)
+

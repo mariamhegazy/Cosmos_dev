@@ -1,0 +1,119 @@
+FROM nvcr.io/nvidia/pytorch:24.10-py3
+
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    ninja-build \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libswresample-dev \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --upgrade pip setuptools wheel
+
+
+RUN git clone https://github.com/triton-lang/triton.git /triton && \
+    cd /triton/python && \
+    pip install ninja cmake wheel && \
+    pip install -e .
+
+
+WORKDIR /workspace
+
+ARG CAUSAL_CONV_TAG=v1.2.2.post1
+
+RUN git clone --depth 1 --branch ${CAUSAL_CONV_TAG} https://github.com/Dao-AILab/causal-conv1d && \
+    cd causal-conv1d && \
+    python setup.py install && \
+    cd .. && \
+    rm -rf causal-conv1d
+
+
+RUN pip install --no-cache-dir imageio[ffmpeg] pyav iopath better_profanity peft git+https://github.com/NVlabs/Pytorch_Retinaface.git@b843f45
+
+
+RUN pip install hatchling
+
+ARG NEMO_RUN_TAG=34259bd3e752fef94045a9a019e4aaf62bd11ce2
+RUN pip install nemo_run@git+https://github.com/NVIDIA/NeMo-Run.git@${NEMO_RUN_TAG}
+
+
+
+COPY NeMo/tools/ctc_segmentation/requirements.txt /workspace/tools/ctc_segmentation/requirements.txt
+
+RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host pypi.ngc.nvidia.com --trusted-host pypi.nvidia.com --trusted-host files.pythonhosted.org --no-build-isolation --extra-index-url https://pypi.nvidia.com \
+    "transformer-engine @ git+https://github.com/NVIDIA/TransformerEngine.git@7f2afaa" \
+    "nvidia-modelopt[torch]" \
+    "apex @ git+https://github.com/NVIDIA/apex.git" \
+    "unstructured==0.14.9" \
+    "llama-index==0.10.43" \
+    "onnxscript @ git+https://github.com/microsoft/onnxscript" \
+    -r tools/ctc_segmentation/requirements.txt
+
+
+
+RUN pip install --no-cache-dir "git+https://github.com/NVIDIA/nvidia-resiliency-ext.git@97aad77609d2e25ed38ac5c99f0c13f93c48464e"
+
+RUN git clone --recursive https://github.com/dmlc/decord.git && \
+    cd decord && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    make -j$(nproc) && \
+    cd ../python && \
+    python3 setup.py install --user && \
+    cd ../../ 
+
+#NeMo
+ARG NEMO_COMMIT
+RUN git clone https://github.com/NVIDIA/NeMo.git && \
+    cd NeMo && \
+    git pull && \
+    if [ ! -z $NEMO_COMMIT ]; then \
+        git fetch origin $NEMO_COMMIT && \
+        git checkout FETCH_HEAD; \
+    fi && \
+    HEAD_NEMO_COMMIT=$(git rev-parse HEAD) && \
+    echo "Container built with NeMo commit hash: $HEAD_NEMO_COMMIT" && \
+    pip uninstall -y nemo_toolkit sacrebleu && \
+    sed -i "/mamba-ssm/d" requirements/requirements_nlp.txt && \
+    if [ $TARGET_ARCH = "arm" ]; then \
+      sed -i "/torch/d" requirements/requirements.txt && \
+      sed -i "/decord/d" requirements/requirements_multimodal.txt && \
+      sed -i "/megatron_core/d" requirements/requirements_nlp.txt; \
+    fi && \
+    pip install -e ".[all]" && \
+    cd nemo/collections/nlp/data/language_modeling/megatron && \
+    make
+
+# Megatron
+RUN rm -rf /opt/megatron-lm
+RUN git clone --single-branch --branch cosmos https://github.com/NVIDIA/Megatron-LM.git /opt/megatron-lm && cd /opt/megatron-lm && pip install -e . && cd megatron/core/datasets && make
+
+COPY ours/autoregressive/enums.py /opt/megatron-lm/megatron/core/transformer/enums.py
+
+
+RUN rm -rf /opt/megatron-lm
+RUN git clone --single-branch --branch cosmos1.0.1 https://github.com/NVIDIA/Megatron-LM.git /opt/megatron-lm && cd /opt/megatron-lm && rm -rf .git
+
+RUN python -c "import nemo; print('NeMo Installed Successfully')"
+
+RUN rm -rf /workspace/NeMo
+# RUN git clone --single-branch --branch physicalai https://github.com/NVIDIA/NeMo.git /workspace/NeMo && cd /workspace/NeMo && git checkout 75aa5fe3e5acc5a885bc3409be553960067fabb9 && rm -rf .git
+RUN git clone --single-branch --branch physicalai https://github.com/NVIDIA/NeMo.git /workspace/NeMo && cd /workspace/NeMo && rm -rf .git
+
+# Cosmos
+COPY cosmos1 /workspace/cosmos1
+COPY README.md /workspace/
+COPY ATTRIBUTIONS.md /workspace/
+COPY requirements.txt /workspace/
+
+RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host pypi.ngc.nvidia.com -r requirements.txt
+
+RUN rm -rf /workspace/cosmos1
+
+ENV PYTHONPATH="/workspace:/opt/megatron-lm:$PYTHONPATH" 
