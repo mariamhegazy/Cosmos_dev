@@ -62,7 +62,7 @@ def cosmos_diffusion_7b_video2world_finetune() -> run.Partial:
     recipe.resume.resume_if_exists = False
 
     # Directory to save checkpoints / logs
-    recipe.log.log_dir = "nemo_experiments/cosmos_diffusion_7b_video2world_finetune"
+    recipe.log.log_dir = "/iopsstor/scratch/cscs/mhasan/cosmos_diffusion_logs/cosmos_diffusion_7b_video2world_finetune"
     
     return recipe
 
@@ -113,7 +113,7 @@ def cosmos_diffusion_14b_video2world_finetune() -> run.Partial:
     recipe.resume.resume_if_exists = False
 
     # Directory to save checkpoints / logs
-    recipe.log.log_dir = "nemo_experiments/cosmos_diffusion_14b_video2world_finetune"
+    recipe.log.log_dir = "/iopsstor/scratch/cscs/mhasan/cosmos_diffusion_logs/cosmos_diffusion_14b_video2world_finetune"
 
     return recipe
 
